@@ -368,7 +368,8 @@ library(data.table)
 library(fpCompare)</code></pre>
 <div id="read-exp.txt-file-and-create-a-data-table" class="section level1">
 <h1>Read exp.txt file and create a data table</h1>
-<pre class="r"><code>exp_df &lt;- read.table(&quot;exp.txt&quot;)
+<pre class="r"><code>setwd(&quot;C:/Users/EmineCevik/Documents/MasterThesis/Data&quot;)
+exp_df &lt;- read.table(&quot;exp.txt&quot;)
 exp_dt &lt;- as.data.table(exp_df)
 
 # exp_dt is the raw data from exp.txt file </code></pre>
