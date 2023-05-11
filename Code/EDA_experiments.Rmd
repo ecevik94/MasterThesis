@@ -1,0 +1,324 @@
+---
+title: "EDA_experiements"
+author: "Emine"
+date: "2023-04-26"
+output: html_document
+---
+
+```{r setup, include = TRUE, echo = FALSE}
+
+knitr::opts_chunk$set(message = FALSE)
+
+```
+
+```{r, warning = FALSE, echo = TRUE}
+library(tidyverse)
+library(data.table)
+library(fpCompare)
+```
+
+# Read exp.txt file and create a data table 
+```{r, echo = TRUE}
+exp_df <- read.table("exp.txt")
+exp_dt <- as.data.table(exp_df)
+
+# exp_dt is the raw data from exp.txt file 
+
+```
+
+# Check the raw data 
+```{r, warning = FALSE, echo = TRUE}
+
+str(exp_dt)
+
+# check na counts for all columns 
+
+na_count <-sapply(exp_dt, function(x) sum(length(which(is.na(x)))))
+na_count <- data.frame(na_count)
+na_count
+
+# risky, exval, order and orderbin have na entries 
+
+# risky is NA, cov0 = cov1 --> it is fine to keep NA (cov : coefficient of 
+# variation of option)
+# exval is NA, ev0 = ev1 --> it is fine to keep NA
+# order is NA --> position of the problem within the experiment is randomized 
+# order bin --> if the problem in the first or second half of the experiment or 
+# unknown
+
+# It is okay to proceed with these NAs 
+
+```
+
+# Time to filter the raw data 
+As a first step, choose the entries with cert = TRUE and type = free
+Secondly, eliminate ther columns that we are not going to use 
+  - outA3, outA4, outA5, outB3, outB4, outB5
+  - probA3, probA4, probA5, probB3, probB4, probB5
+  
+
+```{r, warning = FALSE, echo = TRUE}
+
+filtered_exp <- exp_dt %>% filter(cert == TRUE, type =='free' )
+
+# short checks
+
+# 1
+# nout should be either 2 or 3
+
+table(filtered_exp$nout)
+
+# 2
+# ev0 = outA1*probA1 + outA2*probA2
+
+filtered_exp[, ev0_check := (outA1*probA1) + (outA2*probA2), ]
+filtered_exp[ev0_check %!=% ev0,]
+
+# 3
+# ev1 = outB1*probB1 + outB2*probB2
+filtered_exp[, ev1_check :=  (outB1*probB1) + (outB2*probB2), ]
+filtered_exp[ev1_check %!=% ev1,]
+
+# delete ev0_check and ev1_check 
+filtered_exp[, c("ev0_check","ev1_check"):= NULL]
+
+
+# 4 : remove the columns that we are not going to use 
+filtered_exp[, c("outA3", "outA4", "outA5", "outB3", "outB4", "outB5", "probA3", "probA4", "probA5", "probB3", "probB4", "probB5") := NULL]
+
+```
+
+# Data cleaning
+
+## Basics
+
+  - We made decisions below to have easier data set 
+  - When choice is equaal to 0 --> A, 1 --> B
+  - When option is equal to 0 --> A, 1 --> B
+  - ev0 --> evA
+  - ev1 --> evB
+
+```{r, warning = FALSE, echo = TRUE}
+
+cleaned_exp <- filtered_exp %>% as.data.table() %>% mutate(choice = ifelse( choice == 0, 'A', 'B'))
+cleaned_exp <- cleaned_exp %>% mutate(option = ifelse( option == 0, 'A', 'B'))
+
+# since values can be either A or B, created factor 
+cleaned_exp$choice <- as.factor(cleaned_exp$choice)
+cleaned_exp$option <- as.factor(cleaned_exp$option)
+
+
+# rename ev0 and ev1 
+cleaned_exp <- cleaned_exp %>% rename ("evA" = "ev0", 
+                                       "evB" = "ev1")
+
+```
+
+Another decision we made was to use ID+Problem+Subject as an identifier for 
+a participants. 
+
+  - We assume that all subjects in different studies are independent from each 
+other
+  - Created a column called identifier that basically combination of ID, Problem, and 
+Subject 
+
+```{r, echo = TRUE}
+
+cleaned_exp <- cleaned_exp %>% unite("identifier", c('id', 'problem', 'subject'), sep = "-", remove = FALSE)
+
+```
+
+## Create columns related to trial 
+
+  - seen_outcome (A1, A2, B1, B2)
+  - seen_option (same as option)
+  - seen_nout (number of distinct seen_outcome)
+  - seen_all (boolean)
+  - seen_A (how many time that the participant saw option A in the run)
+  - seen_B (how many time that the participant saw option B in the run)
+  - seen_A1 (how many time that the participant saw outcome A1 in the run)
+  - seen_A2 (how many time that the participant saw outcome A2 in the run)
+  - seen_B1 (how many time that the participant saw outcome B1 in the run)
+  - seen_B2 (how many time that the participant saw outcome B2 in the run)
+  - seen_probA1 
+  - seen_probA2
+  - seen_probB1
+  - seen_probB2
+  - seen_evA
+  - seen_evB
+  - seen_sameDistA
+  - seen_sameDistB
+  - seen_diff_evA
+  - seen_diff_evB 
+  
+
+```{r, echo = TRUE}
+
+# Let's start with column seen_all (boolean)
+# note: it is important to use option condition because outcomes could be same in option A and B
+cleaned_exp <- cleaned_exp %>% mutate(seen_outcome = case_when 
+                                      ( option == 'A' & outcome == outA1 ~ 'A1',
+                                        option == 'A' & outcome == outA2 ~ 'A2',
+                                        option == 'B' & outcome == outB1 ~ 'B1',
+                                        option == 'B' & outcome == outB2 ~ 'B2'))
+
+
+# seen_option : even though it is exactly same with option column, I want to have it 
+# for sanitary check later on
+cleaned_exp <- cleaned_exp %>% mutate(seen_option = option)
+
+
+# seen_nout (number of distinct seen_outcome)
+cleaned_exp <- cleaned_exp %>%group_by(identifier) %>% 
+  mutate(seen_nout = n_distinct(seen_outcome))
+
+
+# seen_all (boolean)
+# since mutate function is computationally heavy, I used data table function 
+# I used mutate, so it is safe to check if cleaned_exop is still data table
+
+cleaned_exp <- as.data.table(cleaned_exp)
+cleaned_exp[, seen_all := ifelse(nout == seen_nout, TRUE, ifelse(nout > seen_nout, FALSE, NA))]
+
+
+# seen_A
+# count option A in a the run 
+cleaned_exp <- cleaned_exp %>%  group_by(identifier) %>% 
+  mutate(seen_A = sum(option == "A")) %>% 
+  ungroup()
+
+
+# seen_B
+# count option A in a the run 
+cleaned_exp <- cleaned_exp %>%  group_by(identifier) %>% 
+  mutate(seen_B = sum(option == "B")) %>% 
+  ungroup()
+
+
+
+# seen_A1 (how many time that the participant saw outcome A1 in the run)
+cleaned_exp <- cleaned_exp %>%  group_by(identifier) %>% 
+  mutate(seen_A1 = sum(seen_outcome == "A1")) %>% 
+  ungroup()
+
+
+# seen_A2 (how many time that the participant saw outcome A2 in the run)
+cleaned_exp <- cleaned_exp %>%  group_by(identifier) %>% 
+  mutate(seen_A2 = sum(seen_outcome == "A2")) %>% 
+  ungroup()
+
+
+# seen_B1 (how many time that the participant saw outcome A1 in the run)
+cleaned_exp <- cleaned_exp %>%  group_by(identifier) %>% 
+  mutate(seen_B1 = sum(seen_outcome == "B1")) %>% 
+  ungroup()
+
+
+# seen_B2 (how many time that the participant saw outcome A2 in the run)
+cleaned_exp <- cleaned_exp %>%  group_by(identifier) %>% 
+  mutate(seen_B2 = sum(seen_outcome == "B2")) %>% 
+  ungroup()
+
+
+# seen_probA1 = seen_A1/seen_A
+cleaned_exp <- as.data.table(cleaned_exp)
+cleaned_exp[, seen_probA1 := round(seen_A1 / seen_A, 3)]
+
+
+# seen_probA2 = seen_A2/seen_A
+cleaned_exp[, seen_probA2 := round(seen_A2 / seen_A, 3)]
+
+
+# seen_probB1 = seen_B1/seen_B
+cleaned_exp[, seen_probB1 := round(seen_B1 / seen_B, 3)]
+
+
+# seen_probB2 = seen_B2/seen_B
+cleaned_exp[, seen_probB2 := round(seen_B2 / seen_B, 3)]
+
+
+# seen_evA = outA1*seen_probA1 + outA2*seen_probA2
+cleaned_exp[, seen_evA := round(outA1*seen_probA1 + outA2*seen_probA2, 3)]
+
+
+# seen_evB = outB1*seen_probB1 + outB2*seen_probB2
+cleaned_exp[, seen_evB := round(outB1*seen_probB1 + outB2*seen_probB2, 3)]
+
+
+# seen_sameDistA
+cleaned_exp[, seen_sameDistA := ifelse(evA %==% seen_evA, TRUE, FALSE)]
+
+
+# seen_sameDistB
+cleaned_exp[, seen_sameDistB := ifelse(evB %==% seen_evB, TRUE, FALSE)]
+
+
+# seen_diff_evA (don't forget, they are percentage) 
+# THINK ABOUT THE CASES WHEN EVA = 0 !!!!!!
+cleaned_exp[, seen_diff_evA := round((evA - seen_evA)/evA, 3)]
+
+
+# seen_diff_evB  (don't forget, they are percentage) 
+# THINK ABOUT THE CASES WHEN EVB = 0 !!!!
+cleaned_exp[, seen_diff_evB := round((evB - seen_evB)/evB, 3)]
+
+```
+
+## Create columns related to sampling behavior
+
+  - sampling_total
+  - sampling_switch
+  - sampling_total_switch
+  - sampling_switch_ratio
+  - sampling_round
+
+```{r, echo = TRUE}
+
+# sampling_total 
+# we can use count trials by identifier or max trial number by identifier 
+# but finding max is operationally less costly than counting 
+cleaned_exp[, sampling_total := max(trial), by = identifier]
+
+
+# sampling switch 
+# I used lag to get the previous option
+cleaned_exp[, sampling_switch := ifelse(trial == 1, "first",
+                                         ifelse(option != lag(option), "yes", "no")), by = identifier]
+
+
+# sampling_total_switch (number of yes in the run by identifier)
+cleaned_exp[, sampling_total_switch := sum(sampling_switch == "yes"), by = identifier]
+
+
+# sampling_switch_ratio (sampling_total_switch/(sampling_total-1))
+cleaned_exp[, sampling_switch_ratio := round(sampling_total_switch/(sampling_total-1), 3), by = identifier]
+
+
+# sampling_round
+# for loop will take time to run so I decided to create a temporary column 
+
+# when we see yes, the round should increase by 1 
+cleaned_exp[, temp := ifelse(sampling_switch == "yes", 1, 0), by = identifier]
+
+# by default, the first round will be 1
+cleaned_exp[, sampling_round := ifelse(sampling_switch == "first", 1, 0), by = identifier]
+
+# then we will add them cumulatively 
+cleaned_exp[, sampling_round := cumsum(sampling_round + temp), by = identifier]
+
+# remove the temporary column
+cleaned_exp[, temp := NULL]
+
+```
+
+```{r, echo = TRUE}
+# now we will create our main data table to conduct analysis 
+main <- cleaned_exp
+head(main)
+
+```
+
+
+# See you soon! 
+# Next section will be about descriptive analysis 
+
