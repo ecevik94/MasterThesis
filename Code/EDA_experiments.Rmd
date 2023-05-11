@@ -19,6 +19,7 @@ library(fpCompare)
 
 # Read exp.txt file and create a data table 
 ```{r, echo = TRUE}
+setwd("C:/Users/EmineCevik/Documents/MasterThesis/Data")
 exp_df <- read.table("exp.txt")
 exp_dt <- as.data.table(exp_df)
 
