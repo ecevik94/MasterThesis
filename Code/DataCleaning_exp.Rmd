@@ -11,6 +11,12 @@ knitr::opts_chunk$set(message = FALSE)
 
 ```
 
+```{r}
+here::i_am("Code/DataCleaning_exp.Rmd")
+```
+
+
+
 ```{r, warning = FALSE, echo = TRUE}
 library(tidyverse)
 library(data.table)
@@ -19,8 +25,8 @@ library(fpCompare)
 
 # Read exp.txt file and create a data table 
 ```{r, echo = TRUE}
-setwd("C:/Users/EmineCevik/Documents/MasterThesis/Data")
-exp_df <- read.table("exp.txt")
+#setwd("C:/Users/EmineCevik/Documents/MasterThesis/Data")
+exp_df <- read.table("Data/exp.txt")
 exp_dt <- as.data.table(exp_df)
 
 # exp_dt is the raw data from exp.txt file 
