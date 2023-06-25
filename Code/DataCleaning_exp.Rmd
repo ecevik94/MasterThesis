@@ -1,32 +1,33 @@
 ---
-title: "EDA_experiements"
-author: "Emine"
+title: "Data cleaning and creating new variables"
+author: "Emine Cevik"
 date: "2023-04-26"
 output: html_document
 ---
-
-```{r setup, include = TRUE, echo = FALSE}
-
-knitr::opts_chunk$set(message = FALSE)
-
-```
-
 ```{r}
 here::i_am("Code/DataCleaning_exp.Rmd")
 ```
 
+
+```{r setup, include = TRUE, echo = FALSE}
+knitr::opts_chunk$set(message = FALSE)
+
+```
 
 
 ```{r, warning = FALSE, echo = TRUE}
 library(tidyverse)
 library(data.table)
 library(fpCompare)
+library(openxlsx)
+library(here)
 ```
+
+
 
 # Read exp.txt file and create a data table 
 ```{r, echo = TRUE}
-#setwd("C:/Users/EmineCevik/Documents/MasterThesis/Data")
-exp_df <- read.table("Data/exp.txt")
+exp_df <- read.table(here("Data", "exp.txt"))
 exp_dt <- as.data.table(exp_df)
 
 # exp_dt is the raw data from exp.txt file 
@@ -100,20 +101,34 @@ filtered_exp[, c("outA3", "outA4", "outA5", "outB3", "outB4", "outB5", "probA3",
 ## Basics
 
   - We made decisions below to have easier data set 
-  - When choice is equaal to 0 --> A, 1 --> B
-  - When option is equal to 0 --> A, 1 --> B
+  - When "choice" is equal to 0 --> A, 1 --> B
+  - When "option" is equal to 0 --> A, 1 --> B
+  - When "exval" is equal to 0 --> A, 1 --> B (also NA)
+  - When "und" is equal to 0 --> A, 1 --> B
+  - When "cpt" is equal to 0 --> A, 1 --> B
+  - When "risky" is equal to 0 --> A, 1 --> B (also NA)
   - ev0 --> evA
   - ev1 --> evB
 
 ```{r, warning = FALSE, echo = TRUE}
 
-cleaned_exp <- filtered_exp %>% as.data.table() %>% mutate(choice = ifelse( choice == 0, 'A', 'B'))
+cleaned_exp <- filtered_exp %>% as.data.table()
+
+cleaned_exp <- cleaned_exp %>% mutate(choice = ifelse( choice == 0, 'A', 'B'))
 cleaned_exp <- cleaned_exp %>% mutate(option = ifelse( option == 0, 'A', 'B'))
+cleaned_exp <- cleaned_exp %>% mutate(und = ifelse( und == 0, 'A', 'B'))
+cleaned_exp <- cleaned_exp %>% mutate(cpt = ifelse( cpt == 0, 'A', 'B'))
+cleaned_exp <- cleaned_exp %>% mutate(exval = ifelse(exval == 0, "A", ifelse(exval == 1, "B", exval)))
+cleaned_exp <- cleaned_exp %>% mutate(risky = ifelse(risky == 0, "A", ifelse(risky == 1, "B", risky)))
+
 
 # since values can be either A or B, created factor 
 cleaned_exp$choice <- as.factor(cleaned_exp$choice)
 cleaned_exp$option <- as.factor(cleaned_exp$option)
-
+cleaned_exp$und <- as.factor(cleaned_exp$und)
+cleaned_exp$cpt <- as.factor(cleaned_exp$cpt)
+cleaned_exp$exval <- as.factor(cleaned_exp$exval)
+cleaned_exp$risky <- as.factor(cleaned_exp$risky)
 
 # rename ev0 and ev1 
 cleaned_exp <- cleaned_exp %>% rename ("evA" = "ev0", 
@@ -122,7 +137,9 @@ cleaned_exp <- cleaned_exp %>% rename ("evA" = "ev0",
 ```
 
 Another decision we made was to use ID+Problem+Subject as an identifier for 
-a participants. 
+a participant and problem. 
+
+Also create a participant column by using id and subject
 
   - We assume that all subjects in different studies are independent from each 
 other
@@ -130,8 +147,12 @@ other
 Subject 
 
 ```{r, echo = TRUE}
+#identifier
+cleaned_exp <- cleaned_exp %>% unite("identifier", c('id', 'subject', 'problem'), sep = "-", remove = FALSE)
 
-cleaned_exp <- cleaned_exp %>% unite("identifier", c('id', 'problem', 'subject'), sep = "-", remove = FALSE)
+
+#participant
+cleaned_exp <- cleaned_exp %>% unite("participant", c('id', 'subject'), sep = "-", remove = FALSE)
 
 ```
 
@@ -155,8 +176,12 @@ cleaned_exp <- cleaned_exp %>% unite("identifier", c('id', 'problem', 'subject')
   - seen_evB
   - seen_sameDistA
   - seen_sameDistB
-  - seen_diff_evA
-  - seen_diff_evB 
+
+Later, I also decided to add
+  - seen_minA 
+  - seen_minB
+  - seen_difference 
+  - seen_exval 
   
 
 ```{r, echo = TRUE}
@@ -260,14 +285,74 @@ cleaned_exp[, seen_sameDistA := ifelse(evA %==% seen_evA, TRUE, FALSE)]
 cleaned_exp[, seen_sameDistB := ifelse(evB %==% seen_evB, TRUE, FALSE)]
 
 
-# seen_diff_evA (don't forget, they are percentage) 
-# THINK ABOUT THE CASES WHEN EVA = 0 !!!!!!
-cleaned_exp[, seen_diff_evA := round((evA - seen_evA)/evA, 3)]
+# seen_ev_diff: difference between seen expected values
+cleaned_exp[, seen_ev_diff := seen_evA - seen_evB]
 
 
-# seen_diff_evB  (don't forget, they are percentage) 
-# THINK ABOUT THE CASES WHEN EVB = 0 !!!!
-cleaned_exp[, seen_diff_evB := round((evB - seen_evB)/evB, 3)]
+# seen_exval: same logic with exval but for seen 
+cleaned_exp[, seen_exval := ifelse(seen_evA > seen_evB, "A",
+                                   ifelse(seen_evA < seen_evB, "B", NA_character_))]
+
+# Convert "outcome" to numeric
+cleaned_exp[, outcome := as.numeric(outcome)]
+
+
+# seen_minA
+cleaned_exp[, seen_minA := ifelse(any(option == "A"), as.numeric(min(outcome[option == "A"])), NA), by = identifier]
+
+
+# seen_minB
+cleaned_exp[, seen_minB := ifelse(any(option == "B"), as.numeric(min(outcome[option == "B"])), NA), by = identifier]
+
+
+# seen_maxA
+cleaned_exp[, seen_maxA := ifelse(any(option == "A"), as.numeric(max(outcome[option == "A"])), NA), by = identifier]
+
+
+# seen_maxB
+cleaned_exp[, seen_maxB := ifelse(any(option == "B"), as.numeric(max(outcome[option == "B"])), NA), by = identifier]
+
+
+#seen_min_outcome
+cleaned_exp[,seen_min_outcome := min(seen_minA, seen_minB), by = identifier]
+
+#seen_max_outcome
+cleaned_exp[,seen_max_outcome := max(seen_maxA, seen_maxB), by = identifier]
+
+#seen_min_option
+cleaned_exp[, seen_min_option := ifelse(seen_minA < seen_minB, "A", "B")]
+
+#seen_max_option
+cleaned_exp[, seen_max_option := ifelse(seen_maxA > seen_maxB, "A", "B")]
+
+# to prevent error
+cleaned_exp[,seen_minB := as.numeric(seen_minB)]
+
+# seen_min_difference (absolute)
+cleaned_exp[, seen_min_difference := ifelse(!is.na(seen_minA) & !is.na(seen_minB), abs(seen_minA - seen_minB), NA),
+            by = identifier]
+
+
+# seen_max_difference (absolute)
+cleaned_exp[, seen_max_difference := ifelse(!is.na(seen_maxA) & !is.na(seen_maxB), abs(seen_maxA - seen_maxB), NA), by = identifier]
+
+
+# seen_highest_difference
+cleaned_exp[, seen_highest_difference := ifelse(abs(seen_maxB - seen_minA) > abs(seen_maxA - seen_minB),
+                                                abs(seen_maxB - seen_minA),
+                                                abs(seen_maxA - seen_minB)), by = identifier]
+
+# seen_covA
+cleaned_exp[, seen_covA := ifelse(seen_A > 0, cov(outcome[option == "A"],outcome[option == "A"]), NA), by = identifier]
+
+
+# seen_covB
+cleaned_exp[, seen_covB := ifelse(seen_B > 0, cov(outcome[option == "B"],outcome[option == "B"]), NA), by = identifier]
+
+
+# seen_risky
+cleaned_exp[, seen_risky := ifelse(seen_covA > seen_covB, "A",
+                                   ifelse(seen_covB > seen_covA, "B", NA_character_)) ]
 
 ```
 
@@ -277,7 +362,7 @@ cleaned_exp[, seen_diff_evB := round((evB - seen_evB)/evB, 3)]
   - sampling_switch
   - sampling_total_switch
   - sampling_switch_ratio
-  - sampling_round
+
 
 ```{r, echo = TRUE}
 
@@ -301,35 +386,119 @@ cleaned_exp[, sampling_total_switch := sum(sampling_switch == "yes"), by = ident
 cleaned_exp[, sampling_switch_ratio := round(sampling_total_switch/(sampling_total-1), 3), by = identifier]
 
 
-# sampling_round
-# for loop will take time to run so I decided to create a temporary column 
-
-# when we see yes, the round should increase by 1 
-cleaned_exp[, temp := ifelse(sampling_switch == "yes", 1, 0), by = identifier]
-
-# by default, the first round will be 1
-cleaned_exp[, sampling_round := ifelse(sampling_switch == "first", 1, 0), by = identifier]
-
-# then we will add them cumulatively 
-cleaned_exp[, sampling_round := cumsum(sampling_round + temp), by = identifier]
-
-# remove the temporary column
-cleaned_exp[, temp := NULL]
-
 ```
+
+
+  - sampling_round
 
 ```{r, echo = TRUE}
-# now we will create our main data table to conduct analysis 
-main <- cleaned_exp
-head(main)
+
+temp <- cleaned_exp[, c("identifier", "trial", "option", "sampling_switch")]
+
+# Initialize round column with NAs
+temp$round <- NA
+
+# Track the current round number
+current_round <- 1
+
+# Track the counts of options A and B within each group
+count_A <- 0
+count_B <- 0
+
+# Iterate through each row
+for (i in 1:nrow(temp)) {
+  
+  if( temp$sampling_switch[i] == "first" )
+  {
+    temp$round[i] <- 1
+  }
+  
+  # Check if the identifier has changed
+  if (i > 1 && temp$identifier[i] != temp$identifier[i-1]) {
+    # Reset the counts for a new group
+    count_A <- 0
+    count_B <- 0
+    current_round <- 1
+  }
+  
+  # Update the counts for the corresponding options
+  if (temp$option[i] == "A") {
+    count_A <- count_A + 1
+  } else if (temp$option[i] == "B") {
+    count_B <- count_B + 1
+  }
+  
+  if (i > 1 && temp$identifier[i] == temp$identifier[i-1])
+  {
+    if(count_A > 0 && count_B > 0)
+    {
+      temp$round[i] <- current_round
+      current_round <- current_round + 1 
+      count_A <- 0
+      count_B <- 0
+    }
+    if (count_A > 0 && count_B == 0)
+    {
+      temp$round[i] <- current_round
+    }
+    if (count_A == 0 && count_B > 0)
+    {
+      temp$round[i] <- current_round
+    }
+  }
+  
+}
+
+cleaned_exp[, sampling_round := temp$round]
+```
+
+sampling round characteristics
+
+```{r, echo = TRUE}
+
+
+# calculate total number of samples in each round 
+cleaned_exp[, sampling_round_length := .N, by = .(identifier, sampling_round)]
+
+
+# calculate the number of rounds in total 
+cleaned_exp[, sampling_round_total := max(sampling_round), by = identifier ]
+
+# calculate average sampling in a round 
+cleaned_exp[, sampling_round_average := mean(unique(sampling_round_length)) , by = identifier ]
+
 
 ```
 
 
-# See you soon! 
-# Next section will be about descriptive analysis 
 
-```{r}
-# test
+
+```{r, echo = TRUE}
+
+# create a subset
+
+# Decide the columns to select
+columns <- c("dom", "identifier", "participant", "choice", "seen_all", "risky", "seen_risky",
+             "exval", "seen_exval", "cpt", "seen_highest_difference", "seen_ev_diff",
+             "seen_max_option", "seen_max_outcome", "seen_min_option", "seen_min_outcome",
+             "outA1", "probA1", "seen_probA1", "outA2", "probA2", "seen_probA2",
+             "outB1", "probB1", "seen_probB1", "outB2", "probB2", "seen_probB2",
+             "evA", "seen_evA", "seen_sameDistA", "evB", "seen_evB", "seen_sameDistB",
+             "sampling_total", "sampling_total_switch", "sampling_switch_ratio",
+             "sampling_round_total", "und", "within", "des", "incentives")
+
+# Create a subset of cleaned_exp by identifier with selected columns
+subset_dt <- cleaned_exp[trial == 1 , ..columns ]
+
+
+# write main data table to excel 
+write.xlsx(subset_dt, file = here("Data", "subset_dt.xlsx"), rowNames = FALSE)
+
+
 ```
+
+It was the process of data cleaning. Now we will use subset_dt as a main data
+source for 
+
+
 
